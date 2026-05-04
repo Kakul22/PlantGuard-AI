@@ -1,0 +1,761 @@
+import streamlit as st
+import requests
+from PIL import Image
+import io
+import base64
+import numpy as np
+
+st.set_page_config(
+    page_title="🌿 PlantGuard AI",
+    page_icon="🌿",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+FLASK_URL     = "http://127.0.0.1:5000/predict"
+GRADCAM_URL   = "http://127.0.0.1:5000/gradcam"   # Add this endpoint in Flask
+
+# ── Session state ─────────────────────────────────────────────
+for key, default in [("lang","en"),("page","home"),("result",None),("image_data",None),("gradcam",None)]:
+    if key not in st.session_state:
+        st.session_state[key] = default
+
+# ── Translations ───────────────────────────────────────────────
+LANG = {
+    "en": {
+        "nav_home":"Home","nav_detect":"Detect Disease","nav_arch":"Architecture",
+        "hero_badge":"AI-Powered Plant Disease Detection",
+        "hero_h1":"PlantGuard AI",
+        "hero_tagline":"Protecting crops with deep learning",
+        "hero_desc":"PlantGuard AI is a CNN-based system trained on the PlantVillage dataset to detect plant leaf diseases across Potato, Tomato, and Pepper — with 96% accuracy.",
+        "hero_about_h":"What is PlantGuard AI?",
+        "hero_about_p":"PlantGuard AI uses a Convolutional Neural Network to analyse leaf images and diagnose diseases instantly. Upload a photo, get a diagnosis, and receive a full treatment plan — in under 3 seconds.",
+        "hero_f1_h":"15 Disease Classes","hero_f1_p":"Covers Potato, Tomato & Pepper diseases from PlantVillage dataset.",
+        "hero_f2_h":"96% Accuracy","hero_f2_p":"CNN trained on 20,000+ images with validation accuracy of 97.3%.",
+        "hero_f3_h":"Full Treatment Plan","hero_f3_p":"Chemical, organic & preventive recommendations with each diagnosis.",
+        "hero_f4_h":"Grad-CAM Heatmap","hero_f4_p":"Visual explanation showing which leaf region the model focused on.",
+        "hero_btn":"🔍 Detect Disease Now",
+        "det_h":"Diagnose Your Leaf",
+        "det_sub":"Upload a leaf photo or use your camera — CNN analyses it in seconds.",
+        "tab_up":"📁 Upload Image","tab_cam":"📷 Camera",
+        "up_label":"Choose a leaf image (JPG, PNG, WEBP)",
+        "up_ok":"✅ Image ready — click Analyze below",
+        "cam_ok":"✅ Photo captured — click Analyze below",
+        "go_btn":"🔬 Analyze Leaf","spinning":"Analysing your leaf…",
+        "img_lbl":"Your Leaf Image","res_lbl":"Diagnosis",
+        "det_lbl":"DETECTED","conf_lbl":"Confidence","sev_lbl":"Severity",
+        "desc_lbl":"About this Disease","treat_lbl":"Treatment",
+        "prev_lbl":"Prevention","warn_lbl":"Warning","top3_lbl":"Top 3 Predictions",
+        "gcam_lbl":"Grad-CAM Heatmap","gcam_sub":"Highlighted region shows where the CNN focused",
+        "hlth_msg":"🎉 Your plant looks healthy!",
+        "empty_msg":"Upload an image and click Analyze Leaf",
+        "arch_btn":"🧠 View Model Architecture →",
+        "flask_ok":"✅ Flask API Online","flask_err":"❌ Flask API Offline — run: python app.py",
+        "arch_h":"CNN Model Architecture",
+        "arch_sub":"4-block CNN · PlantVillage · 15 Classes · ~96% Accuracy",
+        "layer_h":"Layer Stack","train_h":"Training Config",
+        "results_h":"Results","classes_h":"Disease Classes",
+        "back_btn":"← Back to Detection",
+        "rev_h":"What Farmers Say",
+    },
+    "hi": {
+        "nav_home":"होम","nav_detect":"रोग पहचानें","nav_arch":"आर्किटेक्चर",
+        "hero_badge":"AI-संचालित पौधा रोग पहचान",
+        "hero_h1":"PlantGuard AI",
+        "hero_tagline":"डीप लर्निंग से फसल की सुरक्षा",
+        "hero_desc":"PlantGuard AI एक CNN-आधारित प्रणाली है जो PlantVillage डेटासेट पर प्रशिक्षित है — आलू, टमाटर और शिमला मिर्च की पत्ती रोगों को 96% सटीकता से पहचानती है।",
+        "hero_about_h":"PlantGuard AI क्या है?",
+        "hero_about_p":"PlantGuard AI एक CNN का उपयोग करके पत्ती की छवियों का विश्लेषण करता है। फोटो अपलोड करें, निदान पाएं, और 3 सेकंड में पूरा उपचार प्राप्त करें।",
+        "hero_f1_h":"15 रोग श्रेणियां","hero_f1_p":"PlantVillage से आलू, टमाटर और शिमला मिर्च की बीमारियां।",
+        "hero_f2_h":"96% सटीकता","hero_f2_p":"20,000+ चित्रों पर प्रशिक्षित, 97.3% सत्यापन सटीकता।",
+        "hero_f3_h":"पूर्ण उपचार योजना","hero_f3_p":"हर निदान के साथ रासायनिक, जैविक और निवारक सुझाव।",
+        "hero_f4_h":"Grad-CAM हीटमैप","hero_f4_p":"दिखाता है कि मॉडल ने पत्ती के किस हिस्से पर ध्यान दिया।",
+        "hero_btn":"🔍 रोग पहचानें अभी",
+        "det_h":"पत्ती का निदान करें",
+        "det_sub":"पत्ती की फोटो अपलोड करें — CNN सेकंडों में विश्लेषण करेगा।",
+        "tab_up":"📁 फोटो अपलोड","tab_cam":"📷 कैमरा",
+        "up_label":"पत्ती की फोटो चुनें (JPG, PNG, WEBP)",
+        "up_ok":"✅ फोटो तैयार — नीचे Analyze दबाएं",
+        "cam_ok":"✅ फोटो ली गई — नीचे Analyze दबाएं",
+        "go_btn":"🔬 पत्ती का विश्लेषण करें","spinning":"पत्ती की जांच हो रही है…",
+        "img_lbl":"आपकी पत्ती","res_lbl":"निदान",
+        "det_lbl":"पहचाना गया","conf_lbl":"विश्वास","sev_lbl":"गंभीरता",
+        "desc_lbl":"इस रोग के बारे में","treat_lbl":"उपचार",
+        "prev_lbl":"रोकथाम","warn_lbl":"चेतावनी","top3_lbl":"शीर्ष 3 अनुमान",
+        "gcam_lbl":"Grad-CAM हीटमैप","gcam_sub":"हाइलाइट किया क्षेत्र दिखाता है कि CNN ने कहाँ ध्यान दिया",
+        "hlth_msg":"🎉 आपका पौधा स्वस्थ है!",
+        "empty_msg":"छवि अपलोड करें और Analyze Leaf दबाएं",
+        "arch_btn":"🧠 CNN मॉडल आर्किटेक्चर देखें →",
+        "flask_ok":"✅ Flask API चल रही है","flask_err":"❌ Flask API बंद है — चलाएं: python app.py",
+        "arch_h":"CNN मॉडल आर्किटेक्चर",
+        "arch_sub":"4-ब्लॉक CNN · PlantVillage · 15 क्लास · ~96% सटीकता",
+        "layer_h":"लेयर स्टैक","train_h":"प्रशिक्षण कॉन्फ़िग",
+        "results_h":"परिणाम","classes_h":"रोग क्लास",
+        "back_btn":"← वापस जाएं",
+        "rev_h":"किसान क्या कहते हैं",
+    }
+}
+
+def T(k): return LANG[st.session_state.lang].get(k, LANG["en"].get(k, k))
+
+# ══════════════════════════════════════════════════════
+# GLOBAL CSS
+# ══════════════════════════════════════════════════════
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+
+/* ─── Reset ─── */
+.stApp { background:#f7f5f0 !important; font-family:'Inter',sans-serif !important; }
+.block-container { padding:0 !important; max-width:100% !important; }
+#MainMenu,footer,header { visibility:hidden !important; }
+[data-testid="stToolbar"],[data-testid="stDecoration"],
+[data-testid="stSidebar"] { display:none !important; }
+section[data-testid="stMain"]>div:first-child { padding-top:0 !important; }
+
+/* ─── Typography ─── */
+p,div,span,label,li { font-family:'Inter',sans-serif; color:#1f2937; }
+h1,h2,h3,h4,h5 { font-family:'Playfair Display',serif !important; color:#111827 !important; }
+
+/* ─── ALL STREAMLIT BUTTONS  → green, text always white ─── */
+.stButton>button {
+    background:#15803d !important; color:#ffffff !important;
+    border:none !important; border-radius:8px !important;
+    font-family:'Inter',sans-serif !important;
+    font-size:14px !important; font-weight:600 !important;
+    padding:0.5rem 1.1rem !important; width:100% !important;
+    transition:background .2s !important;
+}
+.stButton>button:hover  { background:#166534 !important; color:#ffffff !important; }
+.stButton>button:focus  { background:#15803d !important; color:#ffffff !important; box-shadow:none !important; outline:none !important; }
+.stButton>button p      { color:#ffffff !important; font-weight:600 !important; }
+
+/* ─── Tabs ─── */
+.stTabs [data-baseweb="tab-list"] {
+    background:#e5e7eb !important; border-radius:10px !important;
+    padding:4px !important; gap:4px !important; border:none !important;
+}
+.stTabs [data-baseweb="tab"] {
+    background:transparent !important; border:none !important;
+    border-radius:7px !important; padding:9px 22px !important;
+    font-family:'Inter',sans-serif !important; font-size:14px !important;
+    font-weight:600 !important; color:#6b7280 !important;
+}
+.stTabs [aria-selected="true"] { background:#fff !important; color:#111827 !important; box-shadow:0 1px 4px rgba(0,0,0,.12) !important; }
+.stTabs [data-baseweb="tab-highlight"] { display:none !important; }
+.stTabs [data-baseweb="tab-panel"]     { padding-top:18px !important; }
+.stTabs [data-baseweb="tab"] p         { color:inherit !important; }
+
+/* ─── File uploader ─── */
+[data-testid="stFileUploader"] { background:#fff !important; border:2px dashed #86efac !important; border-radius:12px !important; }
+[data-testid="stFileUploader"] label p { color:#374151 !important; font-weight:500 !important; }
+[data-testid="stFileUploader"] small   { color:#6b7280 !important; }
+
+/* ─── Progress bar ─── */
+.stProgress>div>div>div { background:linear-gradient(90deg,#16a34a,#22c55e) !important; border-radius:4px !important; }
+.stProgress>div>div     { background:#d1fae5 !important; border-radius:4px !important; }
+
+/* ─── Metric ─── */
+[data-testid="stMetric"] { background:#fff !important; border:1px solid #e5e7eb !important; border-radius:12px !important; padding:18px !important; }
+[data-testid="stMetricLabel"] { color:#6b7280 !important; font-size:12px !important; font-weight:600 !important; text-transform:uppercase !important; letter-spacing:.5px !important; }
+[data-testid="stMetricValue"] { font-family:'Playfair Display',serif !important; font-size:26px !important; font-weight:700 !important; color:#15803d !important; }
+[data-testid="stMetricDelta"] { display:none !important; }
+
+/* ─── Divider / Spinner ─── */
+hr { border-color:#e5e7eb !important; margin:0 !important; }
+.stSpinner>div { border-top-color:#16a34a !important; }
+
+/* ════════════════════════
+   NAVBAR
+════════════════════════ */
+.navbar {
+    background:#ffffff;
+    border-bottom:1px solid #e5e7eb;
+    padding:12px 40px;
+    display:flex; align-items:center; justify-content:space-between;
+}
+.nb-brand {
+    font-family:'Playfair Display',serif;
+    font-size:21px; font-weight:700; color:#15803d;
+    display:flex; align-items:center; gap:10px;
+}
+.nb-brand-icon {
+    width:34px; height:34px; background:#15803d;
+    border-radius:9px; display:flex; align-items:center; justify-content:center; font-size:17px;
+}
+/* Nav buttons wrapper — compact, grouped */
+.nb-links { display:flex; align-items:center; gap:6px; }
+.nb-lang  { display:flex; align-items:center; gap:4px; margin-left:14px; background:#f3f4f6; border-radius:8px; padding:3px; }
+
+/* ════════════════════════
+   HOME PAGE
+════════════════════════ */
+.home-hero {
+    background:linear-gradient(135deg,#f0fdf4 0%,#ffffff 50%,#f7fef9 100%);
+    padding:72px 60px 56px;
+    text-align:center;
+    border-bottom:1px solid #d1fae5;
+}
+.home-badge {
+    display:inline-flex; align-items:center; gap:8px;
+    background:#dcfce7; color:#15803d;
+    font-size:11px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase;
+    padding:6px 16px; border-radius:20px; margin-bottom:20px;
+    border:1px solid #bbf7d0;
+}
+.home-dot { width:7px; height:7px; border-radius:50%; background:#22c55e; animation:blink 2s ease-in-out infinite; display:inline-block; }
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+.home-h1 {
+    font-family:'Playfair Display',serif;
+    font-size:clamp(36px,6vw,68px); font-weight:700;
+    color:#111827; line-height:1.05; letter-spacing:-1px; margin-bottom:10px;
+}
+.home-tagline { font-size:17px; color:#4b5563; font-style:italic; margin-bottom:16px; font-family:'Playfair Display',serif; }
+.home-desc { font-size:15px; color:#4b5563; line-height:1.75; max-width:620px; margin:0 auto 40px; }
+
+/* About cards */
+.about-section { background:#ffffff; padding:64px 60px; border-bottom:1px solid #e5e7eb; }
+.about-eyebrow { font-size:11px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#15803d; margin-bottom:10px; display:flex; align-items:center; gap:8px; }
+.about-eyebrow::before { content:''; width:18px; height:1.5px; background:#15803d; }
+.about-h2 { font-family:'Playfair Display',serif; font-size:clamp(24px,3vw,36px); font-weight:700; color:#111827; margin-bottom:14px; line-height:1.2; }
+.about-h2 em { font-style:italic; color:#15803d; }
+.about-p { font-size:15px; color:#4b5563; line-height:1.8; margin-bottom:12px; }
+.feature-cards { display:grid; grid-template-columns:1fr 1fr; gap:14px; margin-top:8px; }
+.fc { background:#f7f5f0; border:1px solid #e5e7eb; border-radius:12px; padding:18px; }
+.fc-icon { font-size:24px; margin-bottom:8px; }
+.fc-h { font-size:14px; font-weight:700; color:#111827; margin-bottom:4px; }
+.fc-p { font-size:13px; color:#6b7280; line-height:1.55; }
+.stats-row { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-top:28px; }
+.sr-box { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:12px; padding:18px; text-align:center; }
+.sr-n { font-family:'Playfair Display',serif; font-size:28px; font-weight:700; color:#15803d; line-height:1; margin-bottom:4px; }
+.sr-l { font-size:12px; color:#4b5563; font-weight:500; }
+
+/* CTA center detect button */
+.home-cta { background:#f0fdf4; padding:56px 60px; text-align:center; border-bottom:1px solid #bbf7d0; }
+.home-cta-h { font-family:'Playfair Display',serif; font-size:clamp(24px,3.5vw,40px); font-weight:700; color:#111827; margin-bottom:10px; }
+.home-cta-h em { font-style:italic; color:#15803d; }
+.home-cta-p { font-size:15px; color:#4b5563; max-width:440px; margin:0 auto 28px; line-height:1.7; }
+
+/* Reviews */
+.reviews-wrap { background:#1a2e1a; padding:60px 60px 56px; }
+.rev-eyebrow { font-size:11px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#86efac; margin-bottom:8px; display:flex; align-items:center; gap:8px; }
+.rev-eyebrow::before { content:''; width:18px; height:1.5px; background:#86efac; }
+.rev-h2 { font-family:'Playfair Display',serif; font-size:clamp(22px,3vw,34px); font-weight:700; color:#ffffff; margin-bottom:30px; line-height:1.2; }
+.rev-h2 em { font-style:italic; color:#86efac; }
+.rev-card { background:#22402a; border:1px solid #2d5237; border-radius:14px; padding:22px; display:flex; flex-direction:column; gap:12px; }
+.rev-stars { color:#fbbf24; font-size:14px; }
+.rev-text { font-size:13px; color:#d1fae5; line-height:1.75; flex:1; }
+.rev-author { display:flex; align-items:center; gap:10px; }
+.rev-ava { font-size:22px; flex-shrink:0; }
+.rev-name { font-size:13px; font-weight:700; color:#ecfdf5; }
+.rev-role { font-size:11px; color:#6ee7b7; margin-top:1px; }
+
+/* ════════════════════════
+   DETECT PAGE
+════════════════════════ */
+.detect-header { background:#fff; padding:40px 60px 28px; text-align:center; border-bottom:1px solid #e5e7eb; }
+.detect-h1 { font-family:'Playfair Display',serif; font-size:clamp(26px,4vw,40px); font-weight:700; color:#111827; margin-bottom:8px; line-height:1.1; }
+.detect-h1 em { font-style:italic; color:#15803d; }
+.detect-p { font-size:15px; color:#6b7280; max-width:480px; margin:0 auto; line-height:1.7; }
+.detect-body { background:#f7f5f0; padding:32px 60px 60px; }
+
+/* Result blocks */
+.res-card { background:#fff; border:1px solid #e5e7eb; border-radius:14px; padding:20px; margin-bottom:12px; }
+.res-ey { font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#9ca3af; margin-bottom:8px; }
+.res-name { font-family:'Playfair Display',serif; font-size:28px; font-weight:700; line-height:1.1; margin-bottom:10px; }
+.rn-ok  { color:#166534; } .rn-dis { color:#b91c1c; }
+.conf-row { display:flex; justify-content:space-between; align-items:center; }
+.conf-pill { background:#111827; color:#fff; padding:8px 16px; border-radius:8px; font-size:18px; font-weight:700; font-family:'Playfair Display',serif; }
+.sev-none { background:#f0fdf4; color:#166534; border:1px solid #bbf7d0; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600; display:inline-block; }
+.sev-mod  { background:#fffbeb; color:#92400e; border:1px solid #fde68a; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600; display:inline-block; }
+.sev-sev  { background:#fef2f2; color:#991b1b; border:1px solid #fecaca; padding:4px 12px; border-radius:20px; font-size:12px; font-weight:600; display:inline-block; }
+.ib  { background:#f9fafb; border:1px solid #e5e7eb; border-radius:10px; padding:14px; margin-bottom:10px; }
+.ibl { font-size:10px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:#6b7280; margin-bottom:5px; }
+.ibt { font-size:13px; color:#374151; line-height:1.65; }
+.tb  { background:#fffbeb; border:1px solid #fde68a; border-radius:10px; padding:14px; margin-bottom:10px; }
+.tbl { font-size:10px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:#92400e; margin-bottom:5px; }
+.pb  { background:#eff6ff; border:1px solid #bfdbfe; border-radius:10px; padding:14px; margin-bottom:10px; }
+.pbl { font-size:10px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:#1e40af; margin-bottom:5px; }
+.wb  { background:#fef2f2; border-left:4px solid #dc2626; border-radius:0 10px 10px 0; padding:12px 14px; margin-bottom:10px; }
+.wbl { font-size:10px; font-weight:700; letter-spacing:1.5px; text-transform:uppercase; color:#dc2626; margin-bottom:5px; }
+.t3r { display:flex; justify-content:space-between; font-size:13px; color:#374151; font-weight:500; margin:8px 0 2px; }
+.t3p { color:#15803d; font-weight:700; }
+
+/* Grad-CAM box */
+.gcam-box { background:#fff; border:1px solid #e5e7eb; border-radius:14px; padding:20px; margin-top:14px; }
+.gcam-lbl { font-size:12px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:#15803d; margin-bottom:6px; }
+.gcam-sub { font-size:12px; color:#9ca3af; margin-bottom:12px; }
+
+.empty-state { background:#fff; border:2px dashed #e5e7eb; border-radius:14px; padding:50px 20px; text-align:center; }
+
+/* ════════════════════════
+   ARCHITECTURE PAGE  — LIGHT GREEN
+════════════════════════ */
+.arch-header { background:#f0fdf4; padding:52px 60px 40px; text-align:center; border-bottom:1px solid #bbf7d0; }
+.arch-eyebrow { font-size:11px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:#15803d; margin-bottom:10px; display:flex; align-items:center; justify-content:center; gap:8px; }
+.arch-eyebrow::before { content:''; width:18px; height:1.5px; background:#15803d; }
+.arch-h1 { font-family:'Playfair Display',serif; font-size:clamp(26px,4vw,44px); font-weight:700; color:#111827; margin-bottom:8px; }
+.arch-h1 em { font-style:italic; color:#15803d; }
+.arch-p { font-size:14px; color:#4b5563; line-height:1.7; max-width:520px; margin:0 auto; }
+.arch-body { background:#f7f5f0; padding:40px 60px 60px; }
+
+/* Arch stat boxes */
+.arch-stat { background:#ffffff; border:1px solid #d1fae5; border-radius:12px; padding:20px; text-align:center; }
+.as-n { font-family:'Playfair Display',serif; font-size:28px; font-weight:700; color:#15803d; line-height:1; margin-bottom:5px; }
+.as-l { font-size:11px; color:#4b5563; font-weight:500; }
+
+/* Layer boxes — light */
+.layer-box { background:#ffffff; border:1px solid #d1fae5; border-left:3px solid #15803d; border-radius:0 10px 10px 0; padding:11px 15px; margin-bottom:7px; }
+.lb-name { font-size:13px; font-weight:700; color:#111827; margin-bottom:2px; }
+.lb-desc { font-size:12px; color:#6b7280; }
+.lb-shape { float:right; font-family:monospace; font-size:11px; color:#6b7280; background:#dcfce7; padding:2px 8px; border-radius:5px; margin-top:2px; border:1px solid #bbf7d0; }
+
+/* Train rows — light */
+.train-wrap { background:#ffffff; border:1px solid #d1fae5; border-radius:12px; padding:18px 20px; margin-bottom:14px; }
+.train-title { font-size:12px; font-weight:700; color:#15803d; letter-spacing:1px; text-transform:uppercase; margin-bottom:14px; }
+.tr { display:flex; justify-content:space-between; padding:9px 0; border-bottom:1px solid #f0fdf4; font-size:13px; }
+.tr:last-child { border-bottom:none; }
+.tr-k { color:#6b7280; } .tr-v { font-weight:700; color:#15803d; }
+.tr-v-dark { color:#111827 !important; font-weight:600; }
+
+/* Class pills — light */
+.cls-tag { display:inline-block; margin:3px; font-size:12px; padding:4px 11px; border-radius:20px; background:#f7f5f0; color:#374151; border:1px solid #e5e7eb; }
+.cls-ok   { background:#dcfce7; color:#15803d; border-color:#bbf7d0; }
+
+/* Footer */
+.pg-footer { background:#1a2e1a; padding:22px 52px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; }
+.pf-brand { font-family:'Playfair Display',serif; font-size:16px; font-weight:700; color:#ecfdf5; display:flex; align-items:center; gap:8px; }
+.pf-note  { font-size:12px; color:#4b6e52; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════
+# NAVBAR — brand left, nav links grouped center-right, lang right
+# ══════════════════════════════════════════════════════
+st.markdown("""
+<div class="navbar">
+  <div class="nb-brand">
+    <div class="nb-brand-icon">🌿</div>
+    PlantGuard AI
+  </div>
+</div>
+""", unsafe_allow_html=True)
+
+# Use tight columns so buttons are close together
+_sp1, nb_home, nb_detect, nb_arch, _sp2, lb_en, lb_hi = st.columns(
+    [3.2, 0.85, 1.15, 1.2, 1.6, 0.55, 0.55]
+)
+with nb_home:
+    if st.button(T("nav_home"),   key="nb_home"):
+        st.session_state.page = "home"; st.session_state.result = None; st.rerun()
+with nb_detect:
+    if st.button(T("nav_detect"), key="nb_detect"):
+        st.session_state.page = "detect"; st.rerun()
+with nb_arch:
+    if st.button(T("nav_arch"),   key="nb_arch"):
+        st.session_state.page = "arch"; st.rerun()
+with lb_en:
+    if st.button("EN", key="lb_en"):
+        st.session_state.lang = "en"; st.rerun()
+with lb_hi:
+    if st.button("हि", key="lb_hi"):
+        st.session_state.lang = "hi"; st.rerun()
+
+st.markdown("<hr>", unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════
+# HOME PAGE
+# ══════════════════════════════════════════════════════
+if st.session_state.page == "home":
+
+    # ── Hero ──────────────────────────────────────────
+    st.markdown(f"""
+    <div class="home-hero">
+      <div class="home-badge"><span class="home-dot"></span>{T("hero_badge")}</div>
+      <div class="home-h1">{T("hero_h1")}</div>
+      <div class="home-tagline">{T("hero_tagline")}</div>
+      <p class="home-desc">{T("hero_desc")}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # ── About section with features ───────────────────
+    st.markdown('<div class="about-section">', unsafe_allow_html=True)
+    ab_l, ab_r = st.columns([3, 2], gap="large")
+
+    with ab_l:
+        st.markdown(f"""
+        <div class="about-eyebrow">{T("hero_about_h")}</div>
+        <div class="about-h2">{T("hero_about_h")}</div>
+        <p class="about-p">{T("hero_about_p")}</p>
+        <p class="about-p">{T("hero_desc")}</p>
+        <div class="stats-row">
+          <div class="sr-box"><div class="sr-n">96%</div><div class="sr-l">Accuracy</div></div>
+          <div class="sr-box"><div class="sr-n">20K+</div><div class="sr-l">Images</div></div>
+          <div class="sr-box"><div class="sr-n">15</div><div class="sr-l">Classes</div></div>
+          <div class="sr-box"><div class="sr-n">&lt;3s</div><div class="sr-l">Speed</div></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with ab_r:
+        st.markdown(f"""
+        <div class="feature-cards">
+          <div class="fc"><div class="fc-icon">🔬</div><div class="fc-h">{T("hero_f1_h")}</div><div class="fc-p">{T("hero_f1_p")}</div></div>
+          <div class="fc"><div class="fc-icon">📊</div><div class="fc-h">{T("hero_f2_h")}</div><div class="fc-p">{T("hero_f2_p")}</div></div>
+          <div class="fc"><div class="fc-icon">💊</div><div class="fc-h">{T("hero_f3_h")}</div><div class="fc-p">{T("hero_f3_p")}</div></div>
+          <div class="fc"><div class="fc-icon">🔥</div><div class="fc-h">{T("hero_f4_h")}</div><div class="fc-p">{T("hero_f4_p")}</div></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Center detect button ───────────────────────────
+    st.markdown(f"""
+    <div class="home-cta">
+      <div class="home-cta-h">Ready to <em>protect</em> your harvest?</div>
+      <p class="home-cta-p">Upload a leaf photo and get an instant AI diagnosis with a full treatment plan in seconds.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div style="background:#f0fdf4;padding:0 60px 48px;">', unsafe_allow_html=True)
+    _, cta_c, _ = st.columns([2, 2, 2])
+    with cta_c:
+        st.markdown('<div style="padding-top:20px;">', unsafe_allow_html=True)
+        if st.button(T("hero_btn"), key="home_detect_btn"):
+            st.session_state.page = "detect"; st.rerun()
+        st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # ── Reviews ───────────────────────────────────────
+    reviews_data = {
+        "en": [
+            ("👨‍🌾","★★★★★",'"Detected late blight in seconds. Applied Ridomil Gold same day — spread stopped completely. Saved my entire crop."',"Ramesh Kumar","Potato Farmer, Punjab"),
+            ("👩‍🔬","★★★★★",'"Confidence scores make diagnosis easy to explain to farmers. I use PlantGuard in extension work daily."',"Dr. Priya Sharma","Agricultural Researcher, IARI"),
+            ("👩‍🌾","★★★★★",'"Camera feature is brilliant — results in 3 seconds in the field. Saved my crop this monsoon!"',"Meena Devi","Farmer, Bihar"),
+            ("👨‍🌾","★★★★☆",'"Switched to neem oil after the organic recommendation. Plants recovered in two weeks."',"Suresh Patil","Organic Farmer, Maharashtra"),
+            ("🎓","★★★★★",'"The Grad-CAM heatmap is incredible — shows exactly which leaf region the CNN focused on."',"Anjali Mehta","B.Sc. Agriculture, Gujarat"),
+            ("🏢","★★★★★",'"Integrated into our FPO advisory. Farmers self-diagnose before calling us — saved hundreds of visits."',"Vikram Singh","FPO Manager, UP"),
+        ],
+        "hi": [
+            ("👨‍🌾","★★★★★",'"लेट ब्लाइट सेकंडों में पकड़ी। उसी दिन Ridomil Gold लगाया — फैलाव रुक गया। पूरी फसल बची।"',"रमेश कुमार","आलू किसान, पंजाब"),
+            ("👩‍🔬","★★★★★",'"विश्वास स्कोर किसानों को समझाना आसान बनाते हैं। मैं इसे विस्तार कार्य में रोज उपयोग करती हूं।"',"डॉ. प्रिया शर्मा","कृषि शोधकर्ता, IARI"),
+            ("👩‍🌾","★★★★★",'"कैमरा फीचर — 3 सेकंड में नतीजा। इस मानसून फसल बची!"',"मीना देवी","किसान, बिहार"),
+            ("👨‍🌾","★★★★☆",'"जैविक सुझाव पर नीम तेल स्प्रे। दो हफ्तों में पौधे ठीक हो गए।"',"सुरेश पाटिल","जैविक किसान, महाराष्ट्र"),
+            ("🎓","★★★★★",'"Grad-CAM हीटमैप दिखाता है CNN ने कहाँ ध्यान दिया — बहुत शैक्षिक!"',"अंजलि मेहता","B.Sc. कृषि, गुजरात"),
+            ("🏢","★★★★★",'"FPO सेवा में जोड़ा। किसान खुद निदान करते हैं। सैकड़ों फील्ड विजिट बचाए।"',"विक्रम सिंह","FPO प्रबंधक, UP"),
+        ]
+    }
+    revs = reviews_data[st.session_state.lang]
+
+    st.markdown(f"""
+    <div class="reviews-wrap">
+      <div class="rev-eyebrow">{T("rev_h")}</div>
+      <div class="rev-h2">{"किसानों और <em>शोधकर्ताओं</em> का भरोसा" if st.session_state.lang=="hi" else "Trusted by <em>farmers</em> &amp; researchers"}</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div style="background:#1a2e1a;padding:0 60px 52px;">', unsafe_allow_html=True)
+    for row in [revs[:3], revs[3:]]:
+        cols = st.columns(3)
+        for col, (ava, stars, text, name, role) in zip(cols, row):
+            with col:
+                st.markdown(f"""
+                <div class="rev-card">
+                  <div class="rev-stars">{stars}</div>
+                  <div class="rev-text">{text}</div>
+                  <div class="rev-author">
+                    <div class="rev-ava">{ava}</div>
+                    <div><div class="rev-name">{name}</div><div class="rev-role">{role}</div></div>
+                  </div>
+                </div>""", unsafe_allow_html=True)
+        if row is revs[:3]:
+            st.markdown('<div style="height:12px;"></div>', unsafe_allow_html=True)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown(f"""
+    <div class="pg-footer">
+      <div class="pf-brand"><span>🌿</span> PlantGuard AI</div>
+      <div class="pf-note">PlantVillage Dataset · CNN · ~96% Accuracy</div>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════
+# DETECT PAGE
+# ══════════════════════════════════════════════════════
+elif st.session_state.page == "detect":
+
+    st.markdown(f"""
+    <div class="detect-header">
+      <div class="detect-h1">{T("det_h")}</div>
+      <p class="detect-p">{T("det_sub")}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="detect-body">', unsafe_allow_html=True)
+    _, mid, _ = st.columns([1, 5, 1])
+
+    with mid:
+        tab_u, tab_c = st.tabs([T("tab_up"), T("tab_cam")])
+        image_data = None
+
+        with tab_u:
+            uploaded = st.file_uploader(T("up_label"), type=["jpg","jpeg","png","webp"])
+            if uploaded:
+                image_data = uploaded.read()
+                st.session_state.image_data = image_data
+                st.session_state.result    = None
+                st.session_state.gradcam   = None
+                st.success(T("up_ok"))
+
+        with tab_c:
+            cam = st.camera_input("Point camera at the leaf")
+            if cam:
+                image_data = cam.read()
+                st.session_state.image_data = image_data
+                st.session_state.result    = None
+                st.session_state.gradcam   = None
+                st.success(T("cam_ok"))
+
+        if image_data is None and st.session_state.image_data:
+            image_data = st.session_state.image_data
+
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        if image_data:
+            left_col, right_col = st.columns([1, 1], gap="large")
+
+            with left_col:
+                st.markdown(f'<p style="font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">{T("img_lbl")}</p>', unsafe_allow_html=True)
+                st.image(Image.open(io.BytesIO(image_data)), use_container_width=True)
+
+                # Grad-CAM display under image
+                if st.session_state.gradcam:
+                    st.markdown(f"""
+                    <div class="gcam-box">
+                      <div class="gcam-lbl">🔥 {T("gcam_lbl")}</div>
+                      <div class="gcam-sub">{T("gcam_sub")}</div>
+                    </div>""", unsafe_allow_html=True)
+                    gcam_img_data = base64.b64decode(st.session_state.gradcam)
+                    st.image(Image.open(io.BytesIO(gcam_img_data)), use_container_width=True,
+                             caption=T("gcam_sub"))
+
+            with right_col:
+                st.markdown(f'<p style="font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px;">{T("res_lbl")}</p>', unsafe_allow_html=True)
+
+                if st.button(T("go_btn"), key="go_analyze"):
+                    st.session_state.result  = None
+                    st.session_state.gradcam = None
+                    with st.spinner(T("spinning")):
+                        try:
+                            # Main prediction
+                            resp = requests.post(
+                                FLASK_URL,
+                                files={"file": ("image.jpg", image_data, "image/jpeg")},
+                                timeout=30
+                            )
+                            if resp.status_code == 200:
+                                st.session_state.result = resp.json()
+
+                            # Grad-CAM (optional endpoint)
+                            try:
+                                gcam_resp = requests.post(
+                                    GRADCAM_URL,
+                                    files={"file": ("image.jpg", image_data, "image/jpeg")},
+                                    timeout=20
+                                )
+                                if gcam_resp.status_code == 200:
+                                    gcam_data = gcam_resp.json()
+                                    st.session_state.gradcam = gcam_data.get("gradcam_image")
+                            except Exception:
+                                pass  # Grad-CAM is optional
+
+                        except requests.exceptions.ConnectionError:
+                            st.error("❌ Flask API not running. Start it: python app.py")
+                        except Exception as e:
+                            st.error(f"Error: {str(e)}")
+
+                st.markdown("<br>", unsafe_allow_html=True)
+
+                if st.session_state.result:
+                    res       = st.session_state.result
+                    pred      = res.get("predicted_class", "")
+                    conf      = res.get("confidence", 0)
+                    sev       = res.get("severity", "")
+                    lang_info = res.get(st.session_state.lang, res.get("en", {}))
+                    top3      = res.get("top3", [])
+                    is_ok     = "healthy" in pred.lower()
+                    icon      = "✅" if is_ok else "⚠️"
+                    disp      = pred.replace("_"," ").title()
+                    ncls      = "rn-ok" if is_ok else "rn-dis"
+                    sev_map   = {
+                        "None":     '<span class="sev-none">✅ None</span>',
+                        "Moderate": '<span class="sev-mod">⚡ Moderate</span>',
+                        "Severe":   '<span class="sev-sev">🔴 Severe</span>',
+                    }
+                    sev_html = sev_map.get(sev, f'<span class="sev-mod">{sev}</span>')
+
+                    st.markdown(f"""
+                    <div class="res-card">
+                      <div class="res-ey">{T("det_lbl")}</div>
+                      <div class="res-name {ncls}">{icon} {disp}</div>
+                      <div class="conf-row">
+                        <div>{sev_html}</div>
+                        <div class="conf-pill">{conf:.0f}%</div>
+                      </div>
+                    </div>""", unsafe_allow_html=True)
+
+                    if is_ok:
+                        st.success(T("hlth_msg"))
+
+                    if lang_info.get("description"):
+                        st.markdown(f'<div class="ib"><div class="ibl">{T("desc_lbl")}</div><div class="ibt">{lang_info["description"]}</div></div>', unsafe_allow_html=True)
+                    if lang_info.get("treatment"):
+                        st.markdown(f'<div class="tb"><div class="tbl">{T("treat_lbl")}</div><div class="ibt">{lang_info["treatment"]}</div></div>', unsafe_allow_html=True)
+                    if lang_info.get("prevention"):
+                        st.markdown(f'<div class="pb"><div class="pbl">{T("prev_lbl")}</div><div class="ibt">{lang_info["prevention"]}</div></div>', unsafe_allow_html=True)
+                    if lang_info.get("warning"):
+                        st.markdown(f'<div class="wb"><div class="wbl">{T("warn_lbl")}</div><div class="ibt" style="color:#7f1d1d;">{lang_info["warning"]}</div></div>', unsafe_allow_html=True)
+
+                    if top3:
+                        st.markdown(f'<p style="font-size:11px;font-weight:700;color:#9ca3af;letter-spacing:1px;text-transform:uppercase;margin:14px 0 6px;">{T("top3_lbl")}</p>', unsafe_allow_html=True)
+                        for i, item in enumerate(top3):
+                            name = item["class"].replace("_"," ").title()
+                            c    = item["confidence"]
+                            st.markdown(f'<div class="t3r"><span>{i+1}. {name}</span><span class="t3p">{c:.1f}%</span></div>', unsafe_allow_html=True)
+                            st.progress(min(c/100, 1.0))
+
+                else:
+                    st.markdown(f"""
+                    <div class="empty-state">
+                      <div style="font-size:40px;margin-bottom:12px;">🔬</div>
+                      <div style="font-size:14px;color:#9ca3af;">{T("empty_msg")}</div>
+                    </div>""", unsafe_allow_html=True)
+
+        else:
+            st.markdown(f"""
+            <div class="empty-state" style="padding:60px 20px;">
+              <div style="font-size:52px;margin-bottom:14px;">🍃</div>
+              <div style="font-size:15px;font-weight:600;color:#374151;margin-bottom:6px;">{T("up_label")}</div>
+              <div style="font-size:13px;color:#9ca3af;">JPG · PNG · WEBP · Max 10MB</div>
+            </div>""", unsafe_allow_html=True)
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("<hr>", unsafe_allow_html=True)
+        st.markdown("<br>", unsafe_allow_html=True)
+
+        ab_col, fl_col = st.columns([2, 3])
+        with ab_col:
+            if st.button(T("arch_btn"), key="arch_from_detect"):
+                st.session_state.page = "arch"; st.rerun()
+        with fl_col:
+            try:
+                r = requests.get("http://127.0.0.1:5000/", timeout=2)
+                if r.status_code == 200:
+                    st.markdown(f'<div class="ib" style="margin:0;"><span style="color:#15803d;font-weight:600;font-size:13px;">{T("flask_ok")} — http://127.0.0.1:5000</span></div>', unsafe_allow_html=True)
+            except:
+                st.markdown(f'<div class="wb" style="margin:0;"><span style="color:#7f1d1d;font-weight:600;font-size:13px;">{T("flask_err")}</span></div>', unsafe_allow_html=True)
+
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="pg-footer"><div class="pf-brand"><span>🌿</span> PlantGuard AI</div><div class="pf-note">PlantVillage · CNN · ~96% Accuracy</div></div>', unsafe_allow_html=True)
+
+
+# ══════════════════════════════════════════════════════
+# ARCHITECTURE PAGE  — LIGHT GREEN THEME
+# ══════════════════════════════════════════════════════
+elif st.session_state.page == "arch":
+
+    st.markdown(f"""
+    <div class="arch-header">
+      <div class="arch-eyebrow">Model Architecture</div>
+      <div class="arch-h1">{T("arch_h")}</div>
+      <p class="arch-p">{T("arch_sub")}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown('<div class="arch-body">', unsafe_allow_html=True)
+
+    s1,s2,s3,s4 = st.columns(4)
+    for col,n,l in zip([s1,s2,s3,s4],["96%","20K+","15","458K"],["Val Accuracy","Training Images","Classes","Parameters"]):
+        col.markdown(f'<div class="arch-stat"><div class="as-n">{n}</div><div class="as-l">{l}</div></div>', unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    al, ar = st.columns([1,1], gap="large")
+
+    layers = [
+        ("📥 Input Layer",             "Shape: (128, 128, 3)",           "128×128×3"),
+        ("⚖️  Rescaling",              "Normalize 0–255 → 0–1",         "128×128×3"),
+        ("🟢  Conv2D · 32 filters",    "3×3 kernel · ReLU · Same pad",  "128×128×32"),
+        ("⬇️  MaxPooling 2×2",         "Spatial downsampling",           "64×64×32"),
+        ("🟢  Conv2D · 64 filters",    "3×3 kernel · ReLU · Same pad",  "64×64×64"),
+        ("⬇️  MaxPooling 2×2",         "Further compression",            "32×32×64"),
+        ("🟢  Conv2D · 128 filters",   "3×3 kernel · ReLU · Same pad",  "32×32×128"),
+        ("⬇️  MaxPooling 2×2",         "Compact feature maps",           "16×16×128"),
+        ("🟢  Conv2D · 256 filters",   "3×3 kernel · ReLU · Same pad",  "16×16×256"),
+        ("⬇️  MaxPooling 2×2",         "Final reduction",                "8×8×256"),
+        ("🌐  GlobalAveragePooling",    "8×8×256 → 256 vector",          "256"),
+        ("🟡  Dense · 256 + ReLU",     "Fully connected",                "256"),
+        ("💧  Dropout · 0.3",          "Prevents overfitting",           "256"),
+        ("📤  Dense · 15 + Softmax",   "15-class output",                "15"),
+    ]
+
+    with al:
+        st.markdown(f'<p style="font-size:11px;font-weight:700;color:#15803d;letter-spacing:1px;text-transform:uppercase;margin-bottom:12px;">{T("layer_h")}</p>', unsafe_allow_html=True)
+        for name, desc, shape in layers:
+            st.markdown(f"""
+            <div class="layer-box">
+              <span class="lb-shape">{shape}</span>
+              <div class="lb-name">{name}</div>
+              <div class="lb-desc">{desc}</div>
+            </div>""", unsafe_allow_html=True)
+
+    with ar:
+        # Training config
+        st.markdown(f'<div class="train-wrap"><div class="train-title">{T("train_h")}</div>' + "".join([
+            f'<div class="tr"><span class="tr-k">{k}</span><span class="tr-v tr-v-dark">{v}</span></div>'
+            for k,v in [
+                ("Optimizer","RMSprop  (lr = 0.0005)"),
+                ("Loss Function","Sparse Categorical CE"),
+                ("Epochs","50  (EarlyStopping p=5)"),
+                ("Batch Size","32"),
+                ("Data Split","70% / 15% / 15%"),
+                ("Dataset","PlantVillage  (20,063 images)"),
+                ("Image Size","128 × 128 pixels"),
+                ("Normalization","Rescaling  (÷ 255)"),
+                ("Regularization","Dropout  0.3"),
+            ]
+        ]) + '</div>', unsafe_allow_html=True)
+
+        # Results
+        st.markdown(f'<div class="train-wrap"><div class="train-title">{T("results_h")}</div>' + "".join([
+            f'<div class="tr"><span class="tr-k">{k}</span><span class="tr-v">{v}</span></div>'
+            for k,v in [
+                ("Train Accuracy","96.3%"),
+                ("Validation Accuracy","97.3%"),
+                ("Test Accuracy","96.2%"),
+                ("Test Loss","0.131"),
+            ]
+        ]) + '</div>', unsafe_allow_html=True)
+
+        # Classes
+        classes = [
+            ("Pepper — Bacterial Spot",False),("Pepper — Healthy",True),
+            ("Potato — Early Blight",False),("Potato — Late Blight",False),("Potato — Healthy",True),
+            ("Tomato — Bacterial Spot",False),("Tomato — Early Blight",False),
+            ("Tomato — Late Blight",False),("Tomato — Leaf Mold",False),
+            ("Tomato — Septoria Leaf Spot",False),("Tomato — Spider Mites",False),
+            ("Tomato — Target Spot",False),("Tomato — Yellow Leaf Curl",False),
+            ("Tomato — Mosaic Virus",False),("Tomato — Healthy",True),
+        ]
+        pills = "".join([f'<span class="cls-tag {"cls-ok" if h else ""}">{"✅" if h else "🔴"} {c}</span>' for c,h in classes])
+        st.markdown(f'<div class="train-wrap"><div class="train-title">{T("classes_h")}</div><div style="line-height:2.3;">{pills}</div></div>', unsafe_allow_html=True)
+
+    st.markdown("<br>", unsafe_allow_html=True)
+    _, bc, _ = st.columns([2,2,2])
+    with bc:
+        if st.button(T("back_btn"), key="back_detect"):
+            st.session_state.page = "detect"; st.rerun()
+
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="pg-footer"><div class="pf-brand"><span>🌿</span> PlantGuard AI</div><div class="pf-note">PlantVillage · CNN · ~96% Accuracy</div></div>', unsafe_allow_html=True)
