@@ -1,0 +1,22 @@
+flask
+streamlit
+tensorflow
+numpy
+opencv-python
+matplotlib
+Pillow
+requests
+
+'''     cd "E:\Plant Disease Detection\flask_app"
+        python app.py
+
+
+
+      cd "E:\Plant Disease Detection\streamlit__app"
+      streamlit run app.py    
+      
+      
+      
+       cd "E:\Plant Disease Detection\streamlit_app"
+      streamlit run app.py                                         '''
+      
