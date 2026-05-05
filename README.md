@@ -21,9 +21,7 @@
 ![Keras](https://img.shields.io/badge/Keras-CNN-red?style=for-the-badge&logo=keras)
 ![Flask](https://img.shields.io/badge/Flask-Backend-black?style=for-the-badge&logo=flask)
 ![Streamlit](https://img.shields.io/badge/Streamlit-UI-ff4b4b?style=for-the-badge&logo=streamlit)
-![JavaScript](https://img.shields.io/badge/JavaScript-Frontend-yellow?style=for-the-badge&logo=javascript)
-![HTML](https://img.shields.io/badge/HTML-UI-orange?style=for-the-badge&logo=html5)
-![CSS](https://img.shields.io/badge/CSS-Styling-blue?style=for-the-badge&logo=css3)
+
 
 ---
 
